@@ -2,21 +2,28 @@ package com.example.lab4project
 
 import android.app.Application
 import android.content.Context
+import android.icu.lang.UCharacter.VerticalOrientation
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -26,7 +33,6 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshots.SnapshotStateObserver
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -50,11 +56,9 @@ import androidx.room.Query
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.Update
-import androidx.room.util.copy
 import com.example.lab4project.ui.theme.Lab4ProjectTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlin.time.Duration.Companion.milliseconds
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,7 +68,7 @@ class MainActivity : ComponentActivity() {
             Lab4ProjectTheme {
                 Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                     Surface(modifier = Modifier.padding(innerPadding)){
-
+                        ShoppingListScreen()
                     }
                 }
             }
@@ -83,7 +87,7 @@ data class ShoppingItem(
 // ORM
 @Dao
 interface ShoppingDao{
-    @Query("SELECT * FROM shopping_items")
+    @Query("SELECT * FROM shopping_items ORDER BY id DESC")
     fun getAllItems(): List<ShoppingItem>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -137,20 +141,22 @@ class ShoppingListViewModel(application: Application): AndroidViewModel(applicat
         }
     }
 
-//    val shoppingList = mutableStateListOf(
-//        ShoppingItem("Молоко"),
-//        ShoppingItem("Хліб"),
-//        ShoppingItem("Яйця"),
-//        ShoppingItem("Масло"),
-//        ShoppingItem("Олія"),
-//        ShoppingItem("Авокадо"),
-//        ShoppingItem("Ананас"),
-//        ShoppingItem("Яйця"),
-//        ShoppingItem("Масло"),
-//        ShoppingItem("Олія"),
-//        ShoppingItem("Авокадо"),
-//        ShoppingItem("Ананас"),
-//    )
+    fun addItem(name: String){
+        viewModelScope.launch(Dispatchers.IO){
+            val newItem = ShoppingItem(name = name)
+            dao.insertItem(newItem)
+            loadShoppingList()
+        }
+    }
+
+    // Додав функцію видалення
+    fun deleteItem(index: Int){
+        viewModelScope.launch(Dispatchers.IO){
+            val item = _shoppingList[index]
+            dao.deleteItem(item)
+            loadShoppingList()
+        }
+    }
 
     fun toggleBought(index: Int){
         viewModelScope.launch(Dispatchers.IO){
@@ -166,7 +172,9 @@ class ShoppingListViewModel(application: Application): AndroidViewModel(applicat
 @Composable
 fun ShoppingItemCard(
     item: ShoppingItem,
-    onToggleBought: () -> Unit = {}
+    onToggleBought: () -> Unit = {},
+    // Додав обробник події видалення
+    onDelete: () -> Unit = {}
 ){
     Row (
         modifier = Modifier
@@ -177,7 +185,7 @@ fun ShoppingItemCard(
                 // MaterialTheme.colorScheme.surfaceDim,
                 MaterialTheme.shapes.large
             )
-            .clickable {onToggleBought()}
+            //.clickable {onToggleBought()}
             .padding(16.dp),
         verticalAlignment = Alignment.CenterVertically
     ){
@@ -189,6 +197,13 @@ fun ShoppingItemCard(
             modifier = Modifier.weight(1f),
             fontSize = 18.sp,
         )
+        // Додав кнопку видалення в UI
+        Button(
+            modifier = Modifier.height(60.dp).width(90.dp),
+            onClick = onDelete
+        ) {
+            Text("Delete")
+        }
     }
 }
 
@@ -204,6 +219,38 @@ class ShoppingListViewModelFactory(private val application: Application):
 }
 
 @Composable
+fun AddItemButton(addItem: (String) -> Unit = {}){
+    var text by remember { mutableStateOf("") }
+
+    Row(modifier = Modifier
+        .padding(top = 25.dp)
+        .fillMaxWidth()
+        .height(80.dp)
+    ) {
+        OutlinedTextField(
+            modifier = Modifier.align(Alignment.CenterVertically),
+            value = text,
+            onValueChange = { text = it},
+            label = { Text("Add Item")}
+        )
+        Button(
+            modifier = Modifier
+                .padding(start = 5.dp, top = 5.dp)
+                .height(60.dp)
+                .width(80.dp)
+                .align(Alignment.CenterVertically),
+            onClick = {
+                if (text.isNotEmpty()){
+                    addItem(text)
+                    text = ""
+                }
+            }) {
+            Text("Add")
+        }
+    }
+}
+
+@Composable
 fun ShoppingListScreen(viewModel: ShoppingListViewModel = viewModel(
     factory = ShoppingListViewModelFactory(LocalContext.current.applicationContext as Application)
 )){
@@ -211,10 +258,16 @@ fun ShoppingListScreen(viewModel: ShoppingListViewModel = viewModel(
         modifier = Modifier.fillMaxSize()
             .padding(16.dp)
     ) {
+        item{
+            AddItemButton{viewModel.addItem(it)}
+        }
+        // Змінив принцип призначення лямба-функцій, вказавши всі ім'я параметрів
         itemsIndexed(viewModel.shoppingList){ ix, item ->
-            ShoppingItemCard(item){
-                viewModel.toggleBought(ix)
-            }
+            ShoppingItemCard(
+                item = item,
+                onToggleBought = { viewModel.toggleBought(ix) },
+                onDelete = { viewModel.deleteItem(ix) }
+            )
         }
     }
 }
@@ -222,7 +275,23 @@ fun ShoppingListScreen(viewModel: ShoppingListViewModel = viewModel(
 @Preview(showBackground = true, showSystemUi = true)
 @Composable
 fun ShoppingListScreenPreview(){
-    ShoppingListScreen()
+    val testList = listOf(
+        ShoppingItem("Молоко", true),
+        ShoppingItem("Хліб"),
+        ShoppingItem("Яйця")
+    )
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize()
+            .padding(16.dp)
+    ) {
+        item{
+            AddItemButton{}
+        }
+        itemsIndexed(testList){ ix, item ->
+            ShoppingItemCard(item)
+        }
+    }
 }
 
 //@Preview(showBackground = true)
