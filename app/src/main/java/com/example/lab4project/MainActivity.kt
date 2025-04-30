@@ -2,16 +2,15 @@ package com.example.lab4project
 
 import android.app.Application
 import android.content.Context
-import android.icu.lang.UCharacter.VerticalOrientation
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.MaterialTheme
@@ -35,8 +33,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,6 +60,7 @@ import androidx.room.Update
 import com.example.lab4project.ui.theme.Lab4ProjectTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -158,6 +160,16 @@ class ShoppingListViewModel(application: Application): AndroidViewModel(applicat
         }
     }
 
+    // Додав функцію редагування
+    fun editItem(index: Int, newName: String){
+        viewModelScope.launch(Dispatchers.IO){
+            val item = _shoppingList[index]
+            val editedItem = item.copy(name = newName)
+            dao.updateItem(editedItem)
+            _shoppingList[index] = editedItem
+        }
+    }
+
     fun toggleBought(index: Int){
         viewModelScope.launch(Dispatchers.IO){
             val item = _shoppingList[index]
@@ -166,6 +178,20 @@ class ShoppingListViewModel(application: Application): AndroidViewModel(applicat
             _shoppingList[index] = updateItem
         }
     }
+
+    // Змінна для зберігання поточного змінюваного індексу
+    var currentEditingIndex by mutableStateOf<Int?>(null)
+        private set
+
+    // Функції для відстеження статусу редагування
+    fun startEditing(index: Int) {
+        currentEditingIndex = index
+    }
+
+    fun stopEditing() {
+        currentEditingIndex = null
+    }
+
 }
 
 // View
@@ -174,35 +200,87 @@ fun ShoppingItemCard(
     item: ShoppingItem,
     onToggleBought: () -> Unit = {},
     // Додав обробник події видалення
-    onDelete: () -> Unit = {}
+    onDelete: () -> Unit = {},
+    // Додав оброник події редагування
+    onEdit: (String) -> Unit = {},
+
+    // Додав змінну для збережння статусу редагування
+    isEditing: Boolean = false,
+    // Додав обробники подій для відстеження статусу редагування
+    onStartEdit: () -> Unit = {},
+    onStopEdit: () -> Unit = {}
 ){
+    // Додав змінну для тексту редагування
+    var editText by remember { mutableStateOf(item.name)}
+
     Row (
         modifier = Modifier
             .fillMaxWidth()
+            .clip(shape = MaterialTheme.shapes.small)
             .padding(8.dp)
             .background(
                 Color.LightGray,
                 // MaterialTheme.colorScheme.surfaceDim,
                 MaterialTheme.shapes.large
             )
-            //.clickable {onToggleBought()}
+            .clickable(
+                indication = null,
+                interactionSource = remember { MutableInteractionSource() }
+            ) { onStartEdit() }
             .padding(16.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
     ){
-        Checkbox(checked = item.isBought, onCheckedChange = {
-            onToggleBought()
+        Checkbox(
+            checked = item.isBought,
+            onCheckedChange = {
+                onToggleBought()
+                onStopEdit()
         })
-        Text(
-            text = item.name,
-            modifier = Modifier.weight(1f),
-            fontSize = 18.sp,
-        )
-        // Додав кнопку видалення в UI
-        Button(
-            modifier = Modifier.height(60.dp).width(90.dp),
-            onClick = onDelete
-        ) {
-            Text("Delete")
+
+        // Відображення залежно від стану isEditing
+        if (isEditing){
+            OutlinedTextField(
+                modifier = Modifier
+                    .width(70.dp)
+                    .weight(1f),
+                value = editText,
+                onValueChange = {editText = it},
+                singleLine = true
+            )
+            Button(
+                modifier = Modifier
+                    .height(60.dp)
+                    .width(90.dp),
+                onClick = {
+                    if (editText.isNotBlank()){
+                        onEdit(editText)
+                        onStopEdit()
+                    }
+                }
+            ) {
+                Text("Save")
+            }
+        } else{
+            Text(
+                text = item.name,
+                modifier = Modifier.weight(1f),
+                fontSize = 18.sp,
+                textDecoration = if (item.isBought) TextDecoration.LineThrough else TextDecoration.None
+            )
+
+            // Додав кнопку видалення в UI
+            Button(
+                modifier = Modifier
+                    .height(60.dp)
+                    .width(90.dp),
+                onClick = {
+                    onDelete()
+                    onStopEdit()
+                }
+
+            ) {
+                Text("Delete")
+            }
         }
     }
 }
@@ -219,19 +297,24 @@ class ShoppingListViewModelFactory(private val application: Application):
 }
 
 @Composable
-fun AddItemButton(addItem: (String) -> Unit = {}){
+fun AddItemButton(
+    addItem: (String) -> Unit = {},
+    onStopEdit: () -> Unit = {}
+){
     var text by remember { mutableStateOf("") }
 
     Row(modifier = Modifier
-        .padding(top = 25.dp)
         .fillMaxWidth()
         .height(80.dp)
     ) {
         OutlinedTextField(
-            modifier = Modifier.align(Alignment.CenterVertically),
+            modifier = Modifier
+                .align(Alignment.CenterVertically)
+                .width(275.dp),
             value = text,
             onValueChange = { text = it},
-            label = { Text("Add Item")}
+            label = { Text("Add Item")},
+            singleLine = true
         )
         Button(
             modifier = Modifier
@@ -242,6 +325,7 @@ fun AddItemButton(addItem: (String) -> Unit = {}){
             onClick = {
                 if (text.isNotEmpty()){
                     addItem(text)
+                    onStopEdit()
                     text = ""
                 }
             }) {
@@ -254,21 +338,42 @@ fun AddItemButton(addItem: (String) -> Unit = {}){
 fun ShoppingListScreen(viewModel: ShoppingListViewModel = viewModel(
     factory = ShoppingListViewModelFactory(LocalContext.current.applicationContext as Application)
 )){
+
     LazyColumn(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
             .padding(16.dp)
     ) {
+        // Додав відображення загальної кількості
+        item {
+            Text(
+                text = "Items bought: ${viewModel.shoppingList.count { it.isBought }}",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp),
+                textAlign = TextAlign.Center
+            )
+        }
         item{
-            AddItemButton{viewModel.addItem(it)}
+            AddItemButton(
+                addItem = {viewModel.addItem((it))},
+                onStopEdit = {viewModel.stopEditing()}
+            )
         }
         // Змінив принцип призначення лямба-функцій, вказавши всі ім'я параметрів
         itemsIndexed(viewModel.shoppingList){ ix, item ->
             ShoppingItemCard(
                 item = item,
                 onToggleBought = { viewModel.toggleBought(ix) },
-                onDelete = { viewModel.deleteItem(ix) }
+                onDelete = { viewModel.deleteItem(ix) },
+                onEdit = { newName -> viewModel.editItem(ix, newName)},
+                isEditing = viewModel.currentEditingIndex == ix,
+                onStartEdit = { viewModel.startEditing(ix)},
+                onStopEdit = { viewModel.stopEditing()}
             )
         }
+
     }
 }
 
@@ -282,9 +387,21 @@ fun ShoppingListScreenPreview(){
     )
 
     LazyColumn(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
             .padding(16.dp)
     ) {
+        item {
+            Text(
+                text = "Total items: 25",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 10.dp),
+                textAlign = TextAlign.Center
+            )
+        }
+
         item{
             AddItemButton{}
         }
