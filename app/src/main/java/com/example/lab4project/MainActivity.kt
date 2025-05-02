@@ -26,6 +26,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -180,16 +181,16 @@ class ShoppingListViewModel(application: Application): AndroidViewModel(applicat
     }
 
     // Змінна для зберігання поточного змінюваного індексу
-    var currentEditingIndex by mutableStateOf<Int?>(null)
+    var currentEditingId by mutableStateOf<Int?>(null)
         private set
 
     // Функції для відстеження статусу редагування
-    fun startEditing(index: Int) {
-        currentEditingIndex = index
+    fun startEditing(id: Int) {
+        currentEditingId = id
     }
 
     fun stopEditing() {
-        currentEditingIndex = null
+        currentEditingId = null
     }
 
 }
@@ -211,7 +212,11 @@ fun ShoppingItemCard(
     onStopEdit: () -> Unit = {}
 ){
     // Додав змінну для тексту редагування
-    var editText by remember { mutableStateOf(item.name)}
+    var editText by remember { mutableStateOf("") }
+
+    LaunchedEffect(item.id) {
+        editText = item.name
+    }
 
     Row (
         modifier = Modifier
@@ -368,8 +373,8 @@ fun ShoppingListScreen(viewModel: ShoppingListViewModel = viewModel(
                 onToggleBought = { viewModel.toggleBought(ix) },
                 onDelete = { viewModel.deleteItem(ix) },
                 onEdit = { newName -> viewModel.editItem(ix, newName)},
-                isEditing = viewModel.currentEditingIndex == ix,
-                onStartEdit = { viewModel.startEditing(ix)},
+                isEditing = viewModel.currentEditingId == item.id,
+                onStartEdit = { viewModel.startEditing(item.id)},
                 onStopEdit = { viewModel.stopEditing()}
             )
         }
@@ -405,7 +410,7 @@ fun ShoppingListScreenPreview(){
         item{
             AddItemButton{}
         }
-        itemsIndexed(testList){ ix, item ->
+        itemsIndexed(testList){ _, item ->
             ShoppingItemCard(item)
         }
     }
